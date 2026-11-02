@@ -390,7 +390,6 @@
             messages.insertBefore(row, document.querySelector('.lr-spacer'));
             messages.scrollTop = messages.scrollHeight;
 
-            // Add Enter key listener
             document.getElementById('lr-in-name').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') submitStep1();
             });
@@ -428,7 +427,6 @@
             messages.insertBefore(row, document.querySelector('.lr-spacer'));
             messages.scrollTop = messages.scrollHeight;
 
-            // Add Enter key listener
             document.getElementById('lr-in-contact').addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') submitStep2();
             });
@@ -440,11 +438,17 @@
             const errEl = document.getElementById('lr-err-2');
             
             let isValid = false;
+            
+            // STRICTER VALIDATION (Email OR valid UK/International phone)
             if (contact.includes('@') && contact.includes('.')) {
                 leadData.email = contact; leadData.phone = null; isValid = true;
             } else {
-                const digits = contact.replace(/\D/g, '');
-                if (digits.length >= 10 && digits.length <= 15) {
+                // Remove spaces, dashes, parentheses
+                const cleanNum = contact.replace(/[\s\-\(\)]/g, '');
+                // Match UK mobile (07...), UK landline (01, 02, 03, 08...), or International (+...)
+                const phoneRegex = /^(?:(?:\+44|0)7\d{9}|(?:\+44|0)[1238]\d{8,9}|\+\d{7,15})$/;
+                
+                if (phoneRegex.test(cleanNum)) {
                     leadData.phone = contact; leadData.email = null; isValid = true;
                 }
             }

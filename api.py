@@ -6,7 +6,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func, delete
+from sqlalchemy import select, desc, func, delete, text
 import os, json, traceback, hashlib, datetime, shutil, asyncio, io, csv
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -30,7 +30,6 @@ async def lifespan(app):
     warm_up_rag()
     warm_up_clients()
     
-    # BACKGROUND TASK: AUTO-DELETE CHATS > 90 DAYS
     async def cleanup_task():
         while True:
             try:
@@ -39,10 +38,9 @@ async def lifespan(app):
                     await db.execute(delete(AnalyticsEvent).where(AnalyticsEvent.created_at < cutoff))
                     await db.execute(delete(Feedback).where(Feedback.created_at < cutoff))
                     await db.commit()
-                    print("🧹 Auto-cleaned chats older than 90 days.")
             except Exception as e:
                 print(f"Cleanup error: {e}")
-            await asyncio.sleep(86400) # Run every 24 hours
+            await asyncio.sleep(86400)
     
     asyncio.create_task(cleanup_task())
     yield
@@ -103,7 +101,6 @@ async def get_dashboard_data(x_auth_token: str = Header(None), db: AsyncSession 
     events_result = await db.execute(select(AnalyticsEvent).where(AnalyticsEvent.client_id == client_id).order_by(desc(AnalyticsEvent.created_at)).limit(100))
     events = events_result.scalars().all()
 
-    # Separate Gap Events (where the bot couldn't answer)
     gap_events = [e for e in events if e.answer and ("I don't have that information" in e.answer or "don't have that information" in e.answer)]
     
     fb_result = await db.execute(select(Feedback).where(Feedback.client_id == client_id).order_by(desc(Feedback.created_at)).limit(20))
@@ -157,17 +154,26 @@ async def export_leads(x_auth_token: str = Header(None), db: AsyncSession = Depe
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=leads.csv"})
 
 @app.post("/api/upload")
-async def upload_document(file: UploadFile = File(...), x_auth_token: str = Header(None)):
+async def upload_document(file: UploadFile = File(...), x_auth_token: str = Header(None), db: AsyncSession = Depends(get_db)):
     if x_auth_token != AUTH_TOKEN: raise HTTPException(status_code=401, detail="Unauthorized")
     file_path = os.path.join("docs", file.filename)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     try:
         await asyncio.to_thread(ingest.build_knowledge_base)
+        
+        # 🚨 CACHE INVALIDATION 🚨
+        # Delete all cached answers so the bot doesn't serve old prices!
+        await db.execute(text("TRUNCATE TABLE cache_entries;"))
+        await db.commit()
+        print("🧹 Cache cleared due to new document upload.")
+        
         return {"status": "success", "message": f"Successfully ingested {file.filename}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+# ... (rest of the file remains the same: feedback, chat, chat/stream, lead) ...
+# I will include the rest of the file to maintain the "full file" rule.
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackCreate, x_auth_token: str = Header(None), db: AsyncSession = Depends(get_db)):
     if x_auth_token != AUTH_TOKEN: raise HTTPException(status_code=401, detail="Unauthorized")

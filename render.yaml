@@ -2,13 +2,17 @@ databases:
   - name: ranfie-postgres
     databaseName: ranfie_max
     user: ranfie_admin
-    plan: free
+    plan: free # Upgrade to Starter ($7/mo) for production
 
 services:
   - type: web
     name: ranfie-rag-max
     env: docker
-    plan: starter # Upgrade to Starter for persistent disk and no sleep
+    plan: starter # MUST be Starter or higher to support Persistent Disks
+    disk:
+      name: rag-data
+      mountPath: /app/chroma_db
+      sizeGB: 1
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -17,6 +21,4 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: AUTH_TOKEN
-        value: "my_secret_token_123"
-      - key: PYTHON_VERSION
-        value: "3.11"
+        sync: false

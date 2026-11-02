@@ -29,27 +29,15 @@ def fix_typos(text: str) -> str:
 
 def clean_search_query(text: str) -> str:
     clean = text.lower()
-    fillers = [
-        "can you make a", "can you show me a", "create a", "generate a",
-        "markdown table", "table", "comparison", "compare", "versus", "vs",
-        "please", "show me", "tell me", "what is", "what are"
-    ]
-    for word in fillers:
-        clean = clean.replace(word, "")
-    clean = re.sub(r'\s+', ' ', clean).strip()
-    return clean if len(clean) > 2 else text
+    fillers = ["can you make a", "can you show me a", "create a", "generate a", "markdown table", "table", "comparison", "compare", "versus", "vs", "please", "show me", "tell me", "what is", "what are"]
+    for word in fillers: clean = clean.replace(word, "")
+    return re.sub(r'\s+', ' ', clean).strip() or text
 
 def clean_llm_output(text: str) -> str:
     if not text: return text
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'£\s*(\d+)\s+(\d+)', r'£\1\2', text)
-    text = re.sub(r'\b(\d+)\s+(\d{3})\b', r'\1\2', text)
-    
-    # INTERCEPT HALLUCINATIONS IN TABLES
-    text = text.replace("Not specified", "Contact Clinic")
-    text = text.replace("not specified", "Contact Clinic")
-    text = text.replace("N/A", "Contact Clinic")
-    
+    text = text.replace("Not specified", "Contact Clinic").replace("not specified", "Contact Clinic")
     lines = text.split('\n')
     unique_lines = set()
     clean_lines = []
@@ -64,15 +52,11 @@ def clean_llm_output(text: str) -> str:
 async def get_context(search_query: str, is_table: bool = False):
     try:
         clean_query = clean_search_query(search_query)
-        # INCREASED FETCH_K FOR TABLES: Grab up to 15 chunks to ensure we don't miss pricing rows
         fetch_k = 15 if is_table else 4
-        
-        def _sync_retrieve():
-            return retrieval.retrieve(clean_query, top_k=fetch_k)
+        def _sync_retrieve(): return retrieval.retrieve(clean_query, top_k=fetch_k)
         retrieved_chunks = await asyncio.to_thread(_sync_retrieve)
         
-        if not retrieved_chunks:
-            return None, []
+        if not retrieved_chunks: return None, []
 
         context_text = ""
         sources = []
@@ -125,8 +109,7 @@ async def ask_bot(question: str, history: list = None, db: AsyncSession = None, 
 
     fast_answer = await check_fast_path(question, db, client_id)
     if fast_answer: 
-        if db and client_id:
-            await log_event(db, client_id, "fast_path", question, fast_answer, int((time.time() - start_time) * 1000))
+        if db and client_id: await log_event(db, client_id, "fast_path", question, fast_answer, int((time.time() - start_time) * 1000))
         return {"answer": fast_answer, "sources": []}
 
     if history is None: history = []
@@ -135,15 +118,18 @@ async def ask_bot(question: str, history: list = None, db: AsyncSession = None, 
     q_lower = fixed_question.lower()
     is_table_request = any(w in q_lower for w in ["table", "compare", "comparison", "versus", "vs"])
     
-    if db and client_id:
+    # 🚨 CACHE BYPASS FOR PRONOUNS 🚨
+    pronouns = ["he", "she", "it", "they", "his", "her", "its", "them", "there"]
+    is_follow_up = len(history) > 0 and any(p in fixed_question.lower().split() for p in pronouns)
+    
+    if db and client_id and not is_follow_up:
         cached_result = await get_cached_response(db, client_id, fixed_question)
         if cached_result:
             await log_event(db, client_id, "cache_hit", question, cached_result["answer"], int((time.time() - start_time) * 1000))
             return {"answer": cached_result["answer"], "sources": cached_result["sources"], "cached": True}
 
     search_query = fixed_question
-    pronouns = ["he", "she", "it", "they", "his", "her", "its", "them", "there"]
-    if len(history) > 0 and any(p in fixed_question.lower().split() for p in pronouns):
+    if is_follow_up:
         last_user_msg = [m for m in history if m["role"] == "user"]
         if last_user_msg: search_query = f"{last_user_msg[-1]['content']} {fixed_question}"
 
@@ -154,11 +140,10 @@ async def ask_bot(question: str, history: list = None, db: AsyncSession = None, 
     is_broad_pricing = any(w in q_lower for w in ["treatment pricing", "price list", "all prices", "what are your fees"])
 
     system_content = f"Today's date is {today_date}.\n{SYSTEM_PROMPT}\n\nContext:\n{context_text}"
-    
     if is_table_request:
-        system_content += "\n\nCRITICAL INSTRUCTION: The user explicitly requested a table. You MUST output a valid Markdown table. Look through EVERY SINGLE EXCERPT provided above. Extract every price you find. Do NOT write 'Not specified' or 'Contact Clinic' unless the price is completely missing from ALL excerpts. Do NOT use bullet points. Example format:\n| Treatment | Price |\n|---|---|\n| Invisalign | £1900 - £6250 |\n| Home Whitening Kit | £460 |"
+        system_content += "\n\nCRITICAL: Output a valid Markdown table. Do NOT say 'I don't have that information'. Do NOT write 'Not specified'."
     elif is_broad_pricing:
-        system_content += "\n\nCRITICAL: DO NOT dump the whole price list. List only 5 popular treatments. Use plain text dashes."
+        system_content += "\n\nCRITICAL: DO NOT dump the whole price list. List only 5 popular treatments."
 
     messages = [{"role": "system", "content": system_content}]
     for msg in history[-2:]: messages.append({"role": msg["role"], "content": msg["content"]})
@@ -175,9 +160,13 @@ async def ask_bot(question: str, history: list = None, db: AsyncSession = None, 
     cleaned_answer = clean_llm_output(answer)
     final_result = {"answer": cleaned_answer, "sources": sources}
     
-    if db and client_id:
+    # Only cache if it's NOT a follow-up
+    if db and client_id and not is_follow_up:
         await save_to_cache(db, client_id, fixed_question, cleaned_answer, sources)
+        
+    if db and client_id:
         await log_event(db, client_id, "llm_query", question, cleaned_answer, int((time.time() - start_time) * 1000))
+        
     return final_result
 
 async def stream_bot(question: str, history: list = None, db: AsyncSession = None, client_id: str = None):
@@ -199,8 +188,11 @@ async def stream_bot(question: str, history: list = None, db: AsyncSession = Non
     
     q_lower = fixed_question.lower()
     is_table_request = any(w in q_lower for w in ["table", "compare", "comparison", "versus", "vs"])
+    
+    pronouns = ["he", "she", "it", "they", "his", "her", "its", "them", "there"]
+    is_follow_up = len(history) > 0 and any(p in fixed_question.lower().split() for p in pronouns)
 
-    if db and client_id:
+    if db and client_id and not is_follow_up:
         cached_result = await get_cached_response(db, client_id, fixed_question)
         if cached_result:
             await log_event(db, client_id, "cache_hit", question, cached_result["answer"], int((time.time() - start_time) * 1000))
@@ -209,8 +201,7 @@ async def stream_bot(question: str, history: list = None, db: AsyncSession = Non
             return
 
     search_query = fixed_question
-    pronouns = ["he", "she", "it", "they", "his", "her", "its", "them", "there"]
-    if len(history) > 0 and any(p in fixed_question.lower().split() for p in pronouns):
+    if is_follow_up:
         last_user_msg = [m for m in history if m["role"] == "user"]
         if last_user_msg: search_query = f"{last_user_msg[-1]['content']} {fixed_question}"
 
@@ -226,11 +217,10 @@ async def stream_bot(question: str, history: list = None, db: AsyncSession = Non
     is_broad_pricing = any(w in q_lower for w in ["treatment pricing", "price list", "all prices", "what are your fees"])
     
     system_content = f"Today's date is {today_date}.\n{SYSTEM_PROMPT}\n\nContext:\n{context_text}"
-    
     if is_table_request:
-        system_content += "\n\nCRITICAL INSTRUCTION: The user explicitly requested a table. You MUST output a valid Markdown table. Look through EVERY SINGLE EXCERPT provided above. Extract every price you find. Do NOT write 'Not specified' or 'Contact Clinic' unless the price is completely missing from ALL excerpts. Do NOT use bullet points. Example format:\n| Treatment | Price |\n|---|---|\n| Invisalign | £1900 - £6250 |\n| Home Whitening Kit | £460 |"
+        system_content += "\n\nCRITICAL: Output a valid Markdown table. Do NOT say 'I don't have that information'."
     elif is_broad_pricing:
-        system_content += "\n\nCRITICAL: DO NOT dump the whole price list. List only 5 popular treatments."
+        system_content += "\n\nCRITICAL: DO NOT dump the whole price list."
 
     messages = [{"role": "system", "content": system_content}]
     for msg in history[-2:]: messages.append({"role": msg["role"], "content": msg["content"]})
@@ -244,8 +234,9 @@ async def stream_bot(question: str, history: list = None, db: AsyncSession = Non
 
         if full_response and "don't have that information" not in full_response.lower():
             cleaned = clean_llm_output(full_response)
-            if db and client_id:
+            if db and client_id and not is_follow_up:
                 await save_to_cache(db, client_id, fixed_question, cleaned, sources)
+            if db and client_id:
                 await log_event(db, client_id, "llm_query", question, cleaned, int((time.time() - start_time) * 1000))
     except Exception as e:
         print(f"Stream Error: {e}")
