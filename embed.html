@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>RanFie Embed Code</title>
+    <style>body { font-family: sans-serif; padding: 40px; background: #f3f4f6; } pre { background: white; padding: 20px; border-radius: 8px; border: 1px solid #ccc; overflow-x: auto; }</style>
+</head>
+<body>
+    <h2>Your Embed Code</h2>
+    <p>Paste this code right before the closing <code>&lt;/body&gt;</code> tag on your website.</p>
+    
+    <pre><code>&lt;!-- RanFie AI Assistant --&gt;
+&lt;script&gt;
+  window.RAG_WIDGET_CONFIG = {
+    // Change this to your live Render URL when you deploy
+    apiUrl: "http://127.0.0.1:8000/chat",
+    streamUrl: "http://127.0.0.1:8000/chat/stream",
+    authToken: "my_secret_token_123"
+  };
+&lt;/script&gt;
+&lt;script src="http://127.0.0.1:8000/widget.js"&gt;&lt;/script&gt;
+&lt;!-- End RanFie --&gt;</code></pre>
+</body>
+</html>

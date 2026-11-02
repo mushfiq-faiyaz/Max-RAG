@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pydantic>=2.0
+sqlalchemy[asyncio]>=2.0
+greenlet
+asyncpg
+pgvector
+python-dotenv
+openai
+slowapi
+rank_bm25
+httpx
+sentence-transformers
+torch
+pdfplumber
+pypdf
+aiosmtplib

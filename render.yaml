@@ -1,0 +1,22 @@
+databases:
+  - name: ranfie-postgres
+    databaseName: ranfie_max
+    user: ranfie_admin
+    plan: free
+
+services:
+  - type: web
+    name: ranfie-rag-max
+    env: docker
+    plan: starter # Upgrade to Starter for persistent disk and no sleep
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ranfie-postgres
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: AUTH_TOKEN
+        value: "my_secret_token_123"
+      - key: PYTHON_VERSION
+        value: "3.11"

@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ranfie_postgres
+    environment:
+      POSTGRES_USER: ranfie_admin
+      POSTGRES_PASSWORD: ranfie_secret_password
+      POSTGRES_DB: ranfie_max
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ranfie_admin -d ranfie_max"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
