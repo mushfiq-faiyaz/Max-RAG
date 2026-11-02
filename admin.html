@@ -10,6 +10,10 @@
         .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
         .drop-zone { border: 2px dashed #cbd5e1; transition: all 0.2s; }
         .drop-zone:hover { border-color: #3b82f6; background: #eff6ff; }
+        .tab-btn { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+        .tab-btn.active { background: #1f2937; color: white; }
+        .tab-btn.inactive { background: #e5e7eb; color: #4b5563; }
+        .tab-btn.inactive:hover { background: #d1d5db; }
     </style>
 </head>
 <body class="min-h-screen p-8 text-gray-800">
@@ -64,7 +68,14 @@
                     <div class="p-0 max-h-[32rem] overflow-y-auto">
                         <table class="w-full text-sm text-left">
                             <thead class="text-xs text-gray-500 uppercase bg-white sticky top-0 shadow-sm z-10">
-                                <tr><th class="px-4 py-3">Name</th><th class="px-4 py-3">Contact</th><th class="px-4 py-3">Interest</th><th class="px-4 py-3">Status</th></tr>
+                                <tr>
+                                    <th class="px-4 py-3">Name & Type</th>
+                                    <th class="px-4 py-3">Contact Info</th>
+                                    <th class="px-4 py-3">Interest</th>
+                                    <th class="px-4 py-3">Status</th>
+                                    <th class="px-4 py-3">Date/Time</th>
+                                    <th class="px-4 py-3 text-right">Action</th>
+                                </tr>
                             </thead>
                             <tbody id="leads-table" class="divide-y divide-gray-100"></tbody>
                         </table>
@@ -72,9 +83,15 @@
                 </div>
 
                 <!-- Gap Analysis -->
-                <div class="card">
-                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50"><h3 class="font-bold text-gray-800">Gap Analysis & Recent Questions</h3></div>
-                    <div class="p-0 max-h-[32rem] overflow-y-auto">
+                <div class="card flex flex-col">
+                    <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                        <h3 class="font-bold text-gray-800">Analytics</h3>
+                        <div class="flex gap-2">
+                            <button id="tab-gaps" class="tab-btn active" onclick="setAnalyticsTab('gaps')">Gap Analysis</button>
+                            <button id="tab-all" class="tab-btn inactive" onclick="setAnalyticsTab('all')">All Questions</button>
+                        </div>
+                    </div>
+                    <div class="p-0 max-h-[32rem] overflow-y-auto flex-1">
                         <table class="w-full text-sm text-left">
                             <thead class="text-xs text-gray-500 uppercase bg-white sticky top-0 shadow-sm z-10">
                                 <tr><th class="px-6 py-3">Question</th><th class="px-6 py-3">Type</th><th class="px-6 py-3">Latency</th></tr>
@@ -89,6 +106,9 @@
 
     <script>
         const token = localStorage.getItem("ranfie_admin_token");
+        let dashboardData = { leads: [], events: [], gap_events: [] };
+        let currentTab = "gaps";
+
         if (!token) {
             document.getElementById('login-view').classList.remove('hidden');
         } else {
@@ -143,44 +163,96 @@
             } catch(e) { alert("Failed to update status"); }
         }
 
+        async function deleteLead(leadId) {
+            if (!confirm("Are you sure you want to delete this lead? This cannot be undone.")) return;
+            try {
+                const res = await fetch(`/api/leads/${leadId}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Auth-Token': token }
+                });
+                if (res.ok) {
+                    fetchDashboard(token); // Refresh data
+                } else {
+                    alert("Failed to delete lead.");
+                }
+            } catch(e) { alert("Network error."); }
+        }
+
+        function setAnalyticsTab(tab) {
+            currentTab = tab;
+            document.getElementById('tab-gaps').className = tab === 'gaps' ? 'tab-btn active' : 'tab-btn inactive';
+            document.getElementById('tab-all').className = tab === 'all' ? 'tab-btn active' : 'tab-btn inactive';
+            renderAnalyticsTable();
+        }
+
+        function renderAnalyticsTable() {
+            const data = currentTab === 'gaps' ? dashboardData.gap_events : dashboardData.events;
+            
+            document.getElementById('analytics-table').innerHTML = data.map(e => `
+                <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 text-sm truncate max-w-[150px]" title="${e.query}">${e.query}</td>
+                    <td class="px-6 py-4">
+                        <span class="px-2 py-1 rounded text-xs font-bold ${e.type === 'cache_hit' ? 'bg-green-100 text-green-700' : e.type === 'fast_path' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}">
+                            ${e.type}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-xs text-gray-500">${e.latency || 0}ms</td>
+                </tr>
+            `).join('') || `<tr><td colspan="3" class="p-6 text-center text-gray-500">No ${currentTab === 'gaps' ? 'unanswered questions' : 'analytics'} yet.</td></tr>`;
+        }
+
         async function fetchDashboard(token) {
             try {
                 const res = await fetch('/api/dashboard', { headers: { 'X-Auth-Token': token } });
                 if (!res.ok) throw new Error("Auth failed");
-                const data = await res.json();
+                
+                dashboardData = await res.json();
 
-                document.getElementById('metric-leads').innerText = data.leads.length;
-                const queries = data.events.filter(e => e.type === 'llm_query');
-                document.getElementById('metric-queries').innerText = data.events.length;
+                // Metrics
+                document.getElementById('metric-leads').innerText = dashboardData.leads.length;
+                const queries = dashboardData.events.filter(e => e.type === 'llm_query');
+                document.getElementById('metric-queries').innerText = dashboardData.events.length;
                 let totalLat = 0; queries.forEach(q => totalLat += (q.latency || 0));
                 document.getElementById('metric-latency').innerText = (queries.length > 0 ? Math.round(totalLat / queries.length) : 0) + "ms";
 
-                document.getElementById('leads-table').innerHTML = data.leads.map(l => `
+                // Leads Table
+                document.getElementById('leads-table').innerHTML = dashboardData.leads.map(l => `
                     <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-4 font-medium text-gray-900">${l.name}<br><span class="text-xs text-gray-500 font-normal">${l.patient}</span></td>
-                        <td class="px-4 py-4 text-xs">${l.phone || l.email || 'N/A'}</td>
-                        <td class="px-4 py-4">
-                            <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-0.5 rounded">${l.treatment}</span><br>
-                            <span class="text-xs text-gray-500">${l.time}</span>
+                        <td class="px-4 py-3">
+                            <div class="font-medium text-gray-900">${l.name}</div>
+                            <div class="text-xs text-gray-500">${l.patient}</div>
                         </td>
-                        <td class="px-4 py-4">
-                            <select onchange="updateStatus('${l.id}', this.value)" class="text-xs border rounded p-1 font-semibold ${l.status==='new'?'bg-yellow-50':l.status==='booked'?'bg-green-50':'bg-gray-50'}">
+                        <td class="px-4 py-3 text-xs font-medium text-gray-700">
+                            ${l.phone ? `<div>📞 ${l.phone}</div>` : ''}
+                            ${l.email ? `<div>✉️ ${l.email}</div>` : ''}
+                            ${(!l.phone && !l.email) ? 'N/A' : ''}
+                        </td>
+                        <td class="px-4 py-3">
+                            <span class="bg-blue-50 text-blue-800 text-[11px] font-semibold px-2 py-0.5 rounded border border-blue-200">${l.treatment}</span>
+                            <div class="text-[11px] text-gray-500 mt-1">${l.time}</div>
+                        </td>
+                        <td class="px-4 py-3">
+                            <select onchange="updateStatus('${l.id}', this.value)" class="text-[11px] border rounded p-1 font-semibold ${l.status==='new'?'bg-yellow-50':l.status==='booked'?'bg-green-50':'bg-gray-50'}">
                                 <option value="new" ${l.status==='new'?'selected':''}>New</option>
                                 <option value="contacted" ${l.status==='contacted'?'selected':''}>Contacted</option>
                                 <option value="booked" ${l.status==='booked'?'selected':''}>Booked</option>
                                 <option value="lost" ${l.status==='lost'?'selected':''}>Lost</option>
                             </select>
                         </td>
+                        <td class="px-4 py-3 text-xs text-gray-500">
+                            ${new Date(l.created).toLocaleDateString()}<br>
+                            ${new Date(l.created).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            <button onclick="deleteLead('${l.id}')" class="text-gray-400 hover:text-red-500 transition-colors p-1" title="Delete Lead">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </td>
                     </tr>
-                `).join('') || '<tr><td colspan="4" class="p-6 text-center text-gray-500">No leads captured yet.</td></tr>';
+                `).join('') || '<tr><td colspan="6" class="p-6 text-center text-gray-500">No leads captured yet.</td></tr>';
 
-                document.getElementById('analytics-table').innerHTML = data.events.map(e => `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-6 py-4 truncate max-w-xs" title="${e.query}">${e.query}</td>
-                        <td class="px-6 py-4"><span class="px-2 py-1 rounded text-xs font-bold ${e.type === 'cache_hit' ? 'bg-green-100 text-green-700' : e.type === 'fast_path' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}">${e.type}</span></td>
-                        <td class="px-6 py-4 text-gray-500">${e.latency || 0}ms</td>
-                    </tr>
-                `).join('') || '<tr><td colspan="3" class="p-6 text-center text-gray-500">No analytics yet.</td></tr>';
+                // Render Analytics Table based on current tab
+                renderAnalyticsTable();
 
             } catch (err) {
                 alert("Session expired."); logout();

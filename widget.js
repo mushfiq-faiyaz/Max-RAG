@@ -166,9 +166,12 @@
             /* STEP-BY-STEP CARD STYLES */
             .lr-step-card { background: white; border: 1px solid #eaeaea; border-radius: 12px; padding: 16px; margin-top: 4px; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.05); position: relative; animation: lr-msgIn 0.3s ease-out; }
             .lr-step-title { font-weight: 700; font-size: 14px; margin-bottom: 10px; color: #1d1d1f; }
-            .lr-step-input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 10px; font-size: 13px; font-family: inherit; outline: none; background: #fff; }
+            .lr-step-input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; margin-bottom: 6px; font-size: 13px; font-family: inherit; outline: none; background: #fff; transition: border-color 0.2s; }
             .lr-step-input:focus { border-color: ${ACCENT_COLOR}; box-shadow: 0 0 0 2px rgba(192, 160, 96, 0.2); }
-            .lr-step-btn { width: 100%; padding: 10px; background: ${ACCENT_COLOR}; color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; transition: filter 0.2s; }
+            .lr-step-input.error { border-color: #ef4444; background: #fef2f2; }
+            .lr-error-text { color: #ef4444; font-size: 11px; margin-bottom: 10px; display: none; font-weight: 500; }
+            .lr-error-text.show { display: block; animation: lr-msgIn 0.2s ease-out; }
+            .lr-step-btn { width: 100%; padding: 10px; background: ${ACCENT_COLOR}; color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; transition: filter 0.2s; margin-top: 4px; }
             .lr-step-btn:hover { filter: brightness(0.9); }
             .lr-step-btn:disabled { opacity: 0.5; cursor: not-allowed; }
             .lr-step-consent { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: #666; margin-bottom: 12px; cursor: pointer; }
@@ -176,7 +179,6 @@
             .lr-step-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
             .lr-step-chip { background: #f9f9f9; border: 1px solid #ddd; padding: 8px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
             .lr-step-chip:hover { border-color: ${ACCENT_COLOR}; background: white; }
-            .lr-step-chip.selected { background: ${ACCENT_COLOR}; color: white; border-color: ${ACCENT_COLOR}; }
 
             @media (max-width: 480px) {
                 #lr-chat-window { width: calc(100vw - 24px); right: 12px; bottom: 75px; height: calc(100dvh - 100px); max-height: none; border-radius: 16px; }
@@ -379,6 +381,7 @@
                 <div class="lr-step-card" id="lr-step-1">
                     <div class="lr-step-title">What is your first name?</div>
                     <input type="text" id="lr-in-name" class="lr-step-input" placeholder="First Name">
+                    <div id="lr-err-1" class="lr-error-text">Please enter a valid name.</div>
                     <button class="lr-step-btn" onclick="submitStep1()">Next</button>
                 </div>
             `;
@@ -386,11 +389,24 @@
             row.innerHTML = botAvatar + `<div class="lr-msg bot" style="max-width: 100%; width: 100%; padding: 0; background: transparent; border: none; box-shadow: none;">${html}</div>`;
             messages.insertBefore(row, document.querySelector('.lr-spacer'));
             messages.scrollTop = messages.scrollHeight;
+
+            // Add Enter key listener
+            document.getElementById('lr-in-name').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') submitStep1();
+            });
         }
 
         window.submitStep1 = () => {
             const name = document.getElementById('lr-in-name').value.trim();
-            if (name.length < 2) { alert("Please enter a valid name."); return; }
+            const inputEl = document.getElementById('lr-in-name');
+            const errEl = document.getElementById('lr-err-1');
+            
+            if (name.length < 2) { 
+                inputEl.classList.add('error');
+                errEl.classList.add('show');
+                return; 
+            }
+            
             document.getElementById('lr-step-1').closest('.lr-msg-row').remove();
             addUserMessage(name);
             leadData.name = name;
@@ -403,6 +419,7 @@
                 <div class="lr-step-card" id="lr-step-2">
                     <div class="lr-step-title">Phone or Email</div>
                     <input type="text" id="lr-in-contact" class="lr-step-input" placeholder="Phone or Email">
+                    <div id="lr-err-2" class="lr-error-text">Please enter a valid phone number or email.</div>
                     <button class="lr-step-btn" onclick="submitStep2()">Next</button>
                 </div>
             `;
@@ -410,10 +427,18 @@
             row.innerHTML = botAvatar + `<div class="lr-msg bot" style="max-width: 100%; width: 100%; padding: 0; background: transparent; border: none; box-shadow: none;">${html}</div>`;
             messages.insertBefore(row, document.querySelector('.lr-spacer'));
             messages.scrollTop = messages.scrollHeight;
+
+            // Add Enter key listener
+            document.getElementById('lr-in-contact').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') submitStep2();
+            });
         }
 
         window.submitStep2 = () => {
             const contact = document.getElementById('lr-in-contact').value.trim();
+            const inputEl = document.getElementById('lr-in-contact');
+            const errEl = document.getElementById('lr-err-2');
+            
             let isValid = false;
             if (contact.includes('@') && contact.includes('.')) {
                 leadData.email = contact; leadData.phone = null; isValid = true;
@@ -423,7 +448,13 @@
                     leadData.phone = contact; leadData.email = null; isValid = true;
                 }
             }
-            if (!isValid) { alert("Please enter a valid phone number (e.g. 07123 456789) or email address."); return; }
+
+            if (!isValid) { 
+                inputEl.classList.add('error');
+                errEl.classList.add('show');
+                return; 
+            }
+            
             document.getElementById('lr-step-2').closest('.lr-msg-row').remove();
             addUserMessage(contact);
             addBotMessage("Which treatment are you most interested in?");
@@ -541,12 +572,10 @@
                     sessionStorage.setItem("lead_captured", "true");
                     sessionStorage.setItem("lead_offered", "true");
                 } else {
-                    alert("Sorry, something went wrong. Please try again.");
-                    btn.innerText = "Submit Request"; btn.disabled = false;
+                    btn.innerText = "Try Again"; btn.disabled = false;
                 }
             } catch (e) {
-                alert("Network error. Please call the clinic directly.");
-                btn.innerText = "Submit Request"; btn.disabled = false;
+                btn.innerText = "Try Again"; btn.disabled = false;
             }
         };
         // --- END STEP-BY-STEP CARD ENGINE ---

@@ -99,14 +99,23 @@ async def get_dashboard_data(x_auth_token: str = Header(None), db: AsyncSession 
     
     leads_result = await db.execute(select(Lead).where(Lead.client_id == client_id).order_by(desc(Lead.created_at)).limit(50))
     leads = leads_result.scalars().all()
+    
     events_result = await db.execute(select(AnalyticsEvent).where(AnalyticsEvent.client_id == client_id).order_by(desc(AnalyticsEvent.created_at)).limit(100))
     events = events_result.scalars().all()
+
+    # Separate Gap Events (where the bot couldn't answer)
+    gap_events = [e for e in events if e.answer and ("I don't have that information" in e.answer or "don't have that information" in e.answer)]
+    
     fb_result = await db.execute(select(Feedback).where(Feedback.client_id == client_id).order_by(desc(Feedback.created_at)).limit(20))
     feedbacks = fb_result.scalars().all()
 
+    def format_event(e):
+        return {"type": e.event_type, "query": e.query, "answer": e.answer, "latency": e.latency_ms, "time": e.created_at.isoformat()}
+
     return {
-        "leads": [{"id": str(l.id), "name": l.name, "phone": l.phone, "treatment": l.treatment, "time": l.preferred_time, "patient": l.patient_type, "status": l.status, "created": l.created_at.isoformat()} for l in leads],
-        "events": [{"type": e.event_type, "query": e.query, "answer": e.answer, "latency": e.latency_ms, "time": e.created_at.isoformat()} for e in events],
+        "leads": [{"id": str(l.id), "name": l.name, "phone": l.phone, "email": l.email, "treatment": l.treatment, "time": l.preferred_time, "patient": l.patient_type, "status": l.status, "created": l.created_at.isoformat()} for l in leads],
+        "events": [format_event(e) for e in events],
+        "gap_events": [format_event(e) for e in gap_events],
         "feedback": [{"query": f.query, "rating": f.rating, "time": f.created_at.isoformat()} for f in feedbacks]
     }
 
@@ -120,6 +129,16 @@ async def update_lead_status(lead_id: str, req: LeadUpdate, x_auth_token: str = 
     lead = result.scalars().first()
     if not lead: raise HTTPException(status_code=404, detail="Lead not found")
     lead.status = req.status
+    await db.commit()
+    return {"status": "success"}
+
+@app.delete("/api/leads/{lead_id}")
+async def delete_lead(lead_id: str, x_auth_token: str = Header(None), db: AsyncSession = Depends(get_db)):
+    if x_auth_token != AUTH_TOKEN: raise HTTPException(status_code=401, detail="Unauthorized")
+    result = await db.execute(select(Lead).where(Lead.id == lead_id))
+    lead = result.scalars().first()
+    if not lead: raise HTTPException(status_code=404, detail="Lead not found")
+    await db.delete(lead)
     await db.commit()
     return {"status": "success"}
 
